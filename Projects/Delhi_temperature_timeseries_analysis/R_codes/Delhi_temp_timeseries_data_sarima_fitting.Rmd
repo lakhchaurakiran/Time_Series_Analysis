@@ -3,6 +3,8 @@ title: "Delhi temperature timeseries data SARIMA model fitting"
 output:
   pdf_document: default
   html_document: default
+  fig_width: 6 
+  fig_height: 4 
 ---
 
 Here we are doing a time-series analysis of the daily temperature in the city of Delhi for the period of Jan 01, 1995 to Dec 31, 2019.
