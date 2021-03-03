@@ -14,6 +14,7 @@ library(dplyr)
 library(lubridate)
 library(astsa)
 library(forecast)
+library(tseries)
 ```
 
 **Reading the data**
@@ -28,10 +29,12 @@ DelhiTemp <- read.csv(file = '../../../Data/Delhi_temperature_1995_2020.csv')
 head(DelhiTemp)
 ```
 
-Creating a date column from Month, Day and Year columns.
+Creating a date column and a YearMon column from Month, Day and Year columns.
 
 ```{r}
 DelhiTemp$Date <- as.Date(with(DelhiTemp, paste(Year, Month, Day,sep="-")), "%Y-%m-%d")
+DelhiTemp$YearMon <- as.yearmon(paste(DelhiTemp$Year, DelhiTemp$Month), "%Y %m")
+
 ```
 
 Temperature vs. Date plot
@@ -67,22 +70,16 @@ plot(Temp~Date)
 Binning temperatures to their mean monthly values
 
 ```{r}
-DelhiMonthlyTemp <- DelhiTemp %>% group_by(Year,Month) %>% summarize(Temperature = mean(Temperature))
+DelhiMonthlyTemp <- DelhiTemp %>% group_by("YearMon"=DelhiTemp$YearMon) %>% summarize(Temperature = mean(Temperature))
 
 head(DelhiMonthlyTemp);
-```
-
-Setting a new date column with just the month and year info
-
-```{r}
-DelhiMonthlyTemp$Date <- as.yearmon(paste(DelhiMonthlyTemp$Year, DelhiMonthlyTemp$Month), "%Y %m")
 ```
 
 **Monthly mean temperature vs. Date (Month) plot**
 
 ```{r}
 Temp <- DelhiMonthlyTemp$Temperature
-Date <- DelhiMonthlyTemp$Date
+Date <- DelhiMonthlyTemp$YearMon
 plot(Temp~Date,type="l")
 ```
 
@@ -96,30 +93,32 @@ Let's first look at the auto-correlation function and the partial auto-correlati
 Temp <- DelhiMonthlyTemp$Temperature
 
 par(mfrow=c(2,1))
-acf(Temp,main='ACF')
-pacf(Temp,main='PACF');
+acf(Temp,main="Auto-Correlation Function of Delhi's mean monthly temperatures")
+pacf(Temp,main="Partial Auto-Correlation Function of Delhi's mean monthly temperatures");
 ```
 
-We see that the ACF also shows clear seasonality.
+We see that the ACF plot also shows lots of correlation and clear seasonality.
 
 ## Guessing the right orders for (S)ARIMA model fitting
 
 1. Differncing orders (d, D)
 
-Non-seasonal and seasonal differencing -> *diff(diff(data),12)*
+Non-seasonal differencing -> *diff(data)*
+Seasonal differencing -> *diff(data,12)*
+Together -> *diff(diff(data),12)*
 
 ```{r}
 plot(diff(diff(Temp),12),type="l")
 ```
 
-the plot shows almost no-trends except for a few large peaks at the center which may be outliers => d=1, D=1. We can also use the AD Fuller test for checking the stationarity
+the plot shows almost no-trends except for a few large peaks at the center which may be outliers => d=1, D=1. We can also use the ADF test for checking the stationarity
 
 ```{r}
-#diff_data <- diff(diff(Temp),12)
-#adf.test(diff_data)
+diff_data <- diff(diff(Temp),12)
+adf.test(diff_data)
 ```
 
-The test confirms that the data is stationary.
+The test confirms that the differenced data is stationary.
 
 2. orders for the auro-regressive (AR) and Moving Average (MA) terms i.e. p and q
 
@@ -131,7 +130,7 @@ acf(diff(diff(Temp),12),main='differnced data ACF',50)
 pacf(diff(diff(Temp),12),main='differnced data PACF',50);
 ```
 
-The ACF plot shows significant correlations at lag=1,11 and 12 while the PACF shows significant correlation for lag=1,11 and 12 The correlations at later parts may be due to seadonality
+The ACF plot shows significant correlations at lag=1,11 and 12 while the PACF shows significant correlation for lag=1,11 and 12 The correlations at later parts may be due to seasonality
 
 ### Finding best parameters using
 1. Grid Search
@@ -176,18 +175,64 @@ auto.arima( y, d = 1, D = 1,  max.p = 5,  max.q = 5,  max.P = 5,  max.Q = 5, max
 
 For some reason auto-arima is unable to reproduce the minimum value of AIC which was found in the grid-search method. From the grid-search the lowest AIC of 1221.998 is found for a 1,1,1,0,1,1,12 SARIMA model which also has a large enough p-value.
 
+### Train-test split
+
+```{r}
+N = length(Temp)
+n = 0.7*N
+train = Temp[1:n]
+test  = Temp[(n+1):N]
+```
+
 ### SARIMA(1,1,1,0,1,1,12) fitting results
 
 ```{r}
-sarima(Temp,1,1,1,0,1,1,12);
+model<-arima(x=train, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=per))
+standard_residuals<- model$residuals/sd(model$residuals)
+plot(standard_residuals,ylab='',main='Standardized Residuals')
 ```
-We see that the residuals are almost stationary and there is not much correlation left in the lags of the residuals, also the p-value of the Ljung-Box test is significant at almost all lags.
+We see that the residuals look almost stationary which we also confirmed with the ADF test
+
+```{r}
+print(adf.test(standard_residuals))
+```
+
+Let's check for correlations in the residual using the ACF plot
+
+```{r}
+acf(standard_residuals,50,main='ACF of standardized residuals');
+```
+
+Next, we will perform a Ljung-Box test on the residuals. The null hypotheis for the test is:\
+H0: The dataset points are independently distributed (not correlated).\
+where a p-value of greater than 0.05 will be insifficient to reject the null hypothesis.
+
+```{r}
+for (lag in seq(1:50)){
+  pval<-Box.test(model$residuals, lag=lag)
+  p[lag]=pval$p.value
+}
+plot(p,ylim = (0.0:1), main='p-value from Ljung-Box test')
+abline(h=0.05,lty=2)
+```
+
+Any value above the dashed line (at y=0.05) is significant. We see that the p-values of the Ljung-Box test at all the lags are significant and therefore the hypothesis that the residuals are not correlated cannot be rejected.
+
+```{r}
+model<-arima(x=train, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=per))
+pred_len=length(test)
+plot(forecast(model, h=pred_len),main='Testing predictions')
+train_x = seq(length(train)+1,length(train)+length(test))
+lines(train_x,test)
+```
+
+Here the black lines in the first part (left) shows the training data and those in the second part shows the test data which alos has blue lines overlaid on it showing the predictions from our model which seem to match the test data pretty well. The small shaded region on the blue lines shows the confidence interval (difficult to resolve here but it actually consists of two different dark and light shaded regions showing the 80% and 95% confidence regions).
 
 ### Forecasting using the best-model
 
 ```{r}
 model<-arima(x=Temp, order = c(1,1,1), seasonal = list(order=c(0,1,1), period=per))
 par(mfrow=c(1,1))
-plot(forecast(model,12)); # forecasting for the 12 months after the end of the dataset
+h=12 # forecasting for the 12 months after the end of the dataset
+plot(forecast(model,h), main='Forecasts for next 12 months'); 
 ```
-
