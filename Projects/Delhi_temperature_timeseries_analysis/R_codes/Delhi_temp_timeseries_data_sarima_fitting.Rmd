@@ -1,8 +1,8 @@
 ---
 title: "Delhi temperature timeseries data SARIMA model fitting"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
 ---
 
 Here we are doing a time-series analysis of the daily temperature in the city of Delhi for the period of Jan 01, 1995 to Dec 31, 2019.
@@ -19,14 +19,13 @@ library(forecast)
 **Reading the data**
 
 ```{r}
-DelhiTemp <- read.csv(file = 'Data/Delhi_temperature_1995_2020.csv')
+DelhiTemp <- read.csv(file = '../../../Data/Delhi_temperature_1995_2020.csv')
 ```
 
-**Plotting the data**
+**Viewing the data**
 
 ```{r}
-Data <- DelhiTemp$Temperature
-plot(Data)
+head(DelhiTemp)
 ```
 
 Creating a date column from Month, Day and Year columns.
@@ -180,7 +179,7 @@ For some reason auto-arima is unable to reproduce the minimum value of AIC which
 ### SARIMA(1,1,1,0,1,1,12) fitting results
 
 ```{r}
-sarima(Temp,1,1,1,0,1,1,12)
+sarima(Temp,1,1,1,0,1,1,12);
 ```
 We see that the residuals are almost stationary and there is not much correlation left in the lags of the residuals, also the p-value of the Ljung-Box test is significant at almost all lags.
 
